@@ -24,7 +24,7 @@ public class AppMain extends Application {
 		public void start(Stage stage) throws Exception {
 			Parent root = FXMLLoader.load(getClass().getResource("MainForm.fxml"));
 			Scene scene = new Scene(root);
-			stage.setTitle("Test");
+			stage.setTitle("SmartBiliards");
 			stage.setScene(scene);
 			stage.sizeToScene();
 			stage.show();
