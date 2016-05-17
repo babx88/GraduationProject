@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.control.*?>
+<?import javafx.scene.text.*?>
+<?import java.lang.*?>
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.layout.AnchorPane?>
+<?import java.net.*?>
+<?import javafx.geometry.*?>
+
+<BorderPane fx:controller="MainForm" maxHeight="-Infinity" maxWidth="-Infinity" minHeight="-Infinity" 
+			minWidth="-Infinity" prefHeight="138.0" prefWidth="384.0" xmlns="http://javafx.com/javafx/8" xmlns:fx="http://javafx.com/fxml/1">
+   <right>
+      <ScrollPane prefHeight="200.0" prefWidth="200.0" BorderPane.alignment="CENTER" />
+   </right>
+   <center>
+      <Button fx:id="btnTest" mnemonicParsing="false" onAction="#btnTestMouseClickHandler" text="파일 선택" BorderPane.alignment="CENTER" />
+   </center>
+   <top>
+      <Label fx:id="label" text="파일을 선택하시오." BorderPane.alignment="CENTER" />
+   </top>
+</BorderPane>

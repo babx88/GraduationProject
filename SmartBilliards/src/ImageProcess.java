@@ -1,5 +1,7 @@
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
+import java.util.List;
 
 import org.opencv.core.Core;
 import org.opencv.core.CvType;
@@ -11,6 +13,8 @@ import org.opencv.core.Size;
 import org.opencv.core.TermCriteria;
 import org.opencv.imgcodecs.Imgcodecs;
 import org.opencv.imgproc.Imgproc;
+
+import javafx.scene.image.Image;
 
 public class ImageProcess {
 	class HoughClass { // 허프클래스를 통해 나온 결과 rho와 theta를 저장할 변수를 내부 클래스로 선언
@@ -38,7 +42,7 @@ public class ImageProcess {
 		kMeanClusters(3);
 		fillArea();
 		inRange(new Scalar(0,0,0), new Scalar(0,0,0), dstImage);
-		
+
 		cannyEdgeDetect(threshold1, threshold1);
 		ArrayList<HoughClass> hough = houghLineExtract(threshold1, threshold2);
 
@@ -46,9 +50,9 @@ public class ImageProcess {
 		createHoughLineOnImage(hough);
 		Point[] pt = extractWarpingPoint(hough);
 		warpImage(pt, width, height);
-		
-//		houghCirclesExtract();
-		
+		Point[] centroidPoint = Labelling();
+		dstImage.setTo(new Scalar(0,255,0)); // 녹색으로 채우기.
+		createBall(centroidPoint);
 		Imgcodecs.imwrite(fileName, dstImage);
 	}
 	private void createHoughLineOnImage(ArrayList<HoughClass> list) {
@@ -74,7 +78,7 @@ public class ImageProcess {
 	private boolean isCorrectLine(ArrayList<HoughClass> list, double rho, double theta) {
 		boolean result = true;
 		for (int k = 0; k < list.size(); k++) {
-			if ( !( (0 < theta && theta < 0.8) || (2.20 < theta && theta < 2.90 ) || (1.3 < theta && theta < 1.8 ) )) {
+			if ( !( (0 <= theta && theta < 1.1) || (2.10 < theta && theta < 2.90 ) || (1.2 < theta && theta < 1.8 ) )) {
 				result = false;
 				break;
 			}
@@ -223,15 +227,14 @@ public class ImageProcess {
 	}
 	private void houghCirclesExtract() {
 		Mat circles = new Mat();
-		Mat mask = new Mat();
-		int minRadius = 10;
-		int maxRadius = 40;
+		int minRadius = 8;
+		int maxRadius = 60;
 		Mat dst = dstImage.clone();
 		Imgproc.cvtColor(dst, dst, Imgproc.COLOR_BGR2GRAY);
+//		Imgproc.GaussianBlur(dst, dst, new Size(3,3), 2);
 		double data[];
 		int cx, cy, r;
-//		Imgproc.GaussianBlur(dstImage, dstImage, new Size(3,3), 2);
-		Imgproc.HoughCircles(dst, circles, Imgproc.CV_HOUGH_GRADIENT, 1, minRadius, 120, 10, minRadius, maxRadius);
+		Imgproc.HoughCircles(dst, circles, Imgproc.CV_HOUGH_GRADIENT, 1, 20, 30, 20, minRadius, maxRadius);
 		System.out.println(circles.cols() + "입니다.");
 		for(int i = 0; i < circles.cols(); i++) {
 			data = circles.get(0, i);
@@ -243,25 +246,50 @@ public class ImageProcess {
 			Imgproc.circle(dstImage, center, r, new Scalar(0, 0, 255), 2);
 		}
 	}
-	private void Labelling() {
+	private Point[] Labelling() {
 		Mat label = new Mat();
 		Mat stats = new Mat();
 		Mat centroids = new Mat();
-		Mat dst = new Mat();
-//		Imgproc.cvtColor(dstImage, dst, Imgproc.COLOR_BGR2GRAY);
-//		Imgproc.threshold(dst, dst, 100, 255, Imgproc.THRESH_OTSU);
-//		inRange(new Scalar(0, 81, 62), new Scalar(356, 57, 100), dst);
-		int numOfLabels = 
-				Imgproc.connectedComponentsWithStats(dst, label, stats, centroids, 8, CvType.CV_32S);
-		System.out.println("라벨 수 : " + numOfLabels);
+		Mat dst = dstImage.clone();
+//		inRange(new Scalar(0, 60, 20), new Scalar(140, 180, 150), dstR);	// RED
+//		inRange(new Scalar(20, 100, 100), new Scalar(30, 255, 255), dstY);	// YELLOW
+//		inRange(new Scalar(0, 0, 240), new Scalar(170, 20, 255), dstW);	// WHITE
+		double[] datas;
+		for(int j = 0; j < dst.rows(); j++) {
+			for(int i = 0; i < dst.cols(); i++) {
+				datas = dst.get(j, i); // BGR 순서로 얻는다.
+				if( datas[0] < 115 && datas[1] < 115 && datas[2] > 150 ) // RED
+					datas[0] = datas[1] = datas[2] = 255;
+				else if( datas[1] > 160 && datas[2] > 180 )  // YELLOW
+					datas[0] = datas[1] = datas[2] = 255;
+				else if( datas[0] > 240 && datas[1] > 240 && datas[2] > 240 )  // W
+					datas[0] = datas[1] = datas[2] = 255;
+				else datas[0] = datas[1] = datas[2] = 0;
+				dst.put(j, i, datas);
+			}
+		}
+		
+		Imgproc.dilate(dst, dst, Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(8, 8)));
+		Imgproc.erode(dst, dst, Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(16,16)));  
+	
+//		dstImage = dst;
+		Imgproc.cvtColor(dst, dst, Imgproc.COLOR_BGR2GRAY);
+		Imgproc.connectedComponentsWithStats(dst, label, stats, centroids, 8, CvType.CV_32S);
+		System.out.println("라벨 수 : " + centroids.rows());
 		Point[] centroidPoint = new Point[ centroids.rows() ];
+		
 		double[] data = new double[2];
-		for (int i = 0; i < numOfLabels; i++) {
+		for (int i = 1; i < centroids.rows(); i++) {
 			Mat region = centroids.row(i);
 			region.get(0, 0, data);
 			centroidPoint[i] = new Point(data[0], data[1]);
-			Imgproc.circle(dstImage, centroidPoint[i], 10, new Scalar(0, 0, 255), 2);			
+			System.out.println("x: " + centroidPoint[i].x + " y: " + centroidPoint[i].y);
 		}
+		return centroidPoint;
 	}
-	
+	private void createBall(Point[] centroidPoint) {
+		for(int i = 1; i < centroidPoint.length; i++) 
+			Imgproc.circle(dstImage, centroidPoint[i], 10, new Scalar(0, 0, 255), 5);			
+
+	}
 }
