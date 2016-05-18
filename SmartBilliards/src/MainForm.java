@@ -45,7 +45,7 @@ public class MainForm {
 			System.out.println("Error");
 		}
 		process = new ImageProcess(file.getPath(), file.getName());
-		process.warpingBiliardsImage(150, 200, 400, 800);		
+		process.warpingBiliardsImage(50, 100, 400, 800);		
 		showImage(file.getName());
 	}
 	private void showImage(String path) {

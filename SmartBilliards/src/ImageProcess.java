@@ -6,6 +6,8 @@ import java.util.List;
 import org.opencv.core.Core;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
+import org.opencv.core.MatOfFloat;
+import org.opencv.core.MatOfInt;
 import org.opencv.core.Point;
 import org.opencv.core.Rect;
 import org.opencv.core.Scalar;
@@ -17,12 +19,27 @@ import org.opencv.imgproc.Imgproc;
 import javafx.scene.image.Image;
 
 public class ImageProcess {
+	public enum Theta {
+		RIGHT_TOP,
+		LEFT_TOP,
+		HORIZONTAL
+	}
 	class HoughClass { // 허프클래스를 통해 나온 결과 rho와 theta를 저장할 변수를 내부 클래스로 선언
 		private double rho;
 		private double theta;
+		public Theta orient;
 		public HoughClass(double rho, double theta) {
 			this.rho = rho;
 			this.theta = theta;
+		}
+		public HoughClass(double rho, double theta, Theta orient) {
+			this.rho = rho;
+			this.theta = theta;
+			this.orient = orient;
+		}
+		@Override
+		public String toString() {
+			return "rho: " + rho + " theta: " + theta + " orient: " + orient + "\n"; 
 		}
 	}
 	private Mat srcImage;
@@ -38,11 +55,54 @@ public class ImageProcess {
 	public Mat getDstImage() {
 		return dstImage;
 	}
+	public int[] histo() {
+		Mat mask = new Mat();
+		Mat hist = new Mat();
+		MatOfFloat ranges=new MatOfFloat(0f, 256f);
+		double[] max = new double[3];
+		max[0] = max[1] = max[2] = 0;
+		int[] index = new int[3];
+		int k = 0;
+		double[] data = new double[256];
+		for(int i = 0; i < 3; i++) {
+			Imgproc.calcHist(Arrays.asList(dstImage), new MatOfInt(i), mask, hist, new MatOfInt(256), ranges);
+			for(int j = 0; j < 256; j++) {
+				data = hist.get(j, 0);
+				if(data[0] > max[k]) {
+					max[k] = data[0];
+					index[k] = j;
+				}
+			}
+			k++;
+		}
+		System.out.println("max[0] = " + index[0] + " max[1] = " + index[1] + " max[2] = " + index[2]);
+		return index;
+	}
+	private void removeTable() {
+		int[] index = histo();
+		boolean isMaxGreen = index[1] > index[2];
+		double[] datas;
+		for(int j = 0; j < dstImage.rows(); j++) {
+			for(int i = 0; i < dstImage.cols(); i++) {
+				datas = dstImage.get(j, i); // BGR 순서로 얻는다.
+				if( isMaxGreen
+						&& index[1] - 40 <= datas[1] && datas[1] <= index[1] + 40 ) // GREEN
+					datas[0] = datas[1] = datas[2] = 0;
+				else if( !isMaxGreen
+						&& index[2] - 40 <= datas[0] && datas[0] <= index[2] + 40 ) // BLUE
+					datas[0] = datas[1] = datas[2] = 0;
+				dstImage.put(j, i, datas);
+			}
+		}
+	}
 	public void warpingBiliardsImage(int threshold1, int threshold2, double width, double height) {
-		kMeanClusters(3);
+		Imgproc.GaussianBlur(dstImage, dstImage, new Size(5,5), 3);
+		kMeanClusters(4);
 		fillArea();
 		inRange(new Scalar(0,0,0), new Scalar(0,0,0), dstImage);
-
+		
+		Imgproc.dilate(dstImage, dstImage, Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(16, 16)));
+		Imgproc.erode(dstImage, dstImage, Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(16,16))); 
 		cannyEdgeDetect(threshold1, threshold1);
 		ArrayList<HoughClass> hough = houghLineExtract(threshold1, threshold2);
 
@@ -50,9 +110,11 @@ public class ImageProcess {
 		createHoughLineOnImage(hough);
 		Point[] pt = extractWarpingPoint(hough);
 		warpImage(pt, width, height);
+//		kMeanClusters(14);
+		Mat dst = dstImage.clone();
 		Point[] centroidPoint = Labelling();
-		dstImage.setTo(new Scalar(0,255,0)); // 녹색으로 채우기.
-		createBall(centroidPoint);
+		dstImage.setTo(new Scalar(85, 107, 45)); // 녹색으로 채우기.
+		createBall(centroidPoint, dst);
 		Imgcodecs.imwrite(fileName, dstImage);
 	}
 	private void createHoughLineOnImage(ArrayList<HoughClass> list) {
@@ -75,17 +137,108 @@ public class ImageProcess {
 //		Imgproc.blur(dstImage, dstImage, new Size(3, 3)); // 영상 블러링(노이즈 제거)
 		Imgproc.Canny(dstImage, dstImage, threshold1, threshold2);
 	}
+	private ArrayList<HoughClass> checkCorrectLine(ArrayList<HoughClass> list) {
+		final int MAX = 0;
+		final int MIN = 1;
+		double leftRhoMean = 0, rightRhoMean = 0, horizontalRhoMean = 0;
+		double leftThetaMean = 0, rightThetaMean = 0, horizontalThetaMean = 0;
+		int leftRhoCount = 0, rightRhoCount = 0, horizontalRhoCount = 0;
+		HoughClass leftTop = null;
+		HoughClass rightTop = null;
+		HoughClass[] horizontal = new HoughClass[2];
+		ArrayList<HoughClass> horizontals = new ArrayList<>();
+		ArrayList<HoughClass> leftTops = new ArrayList<>();
+		ArrayList<HoughClass> rightTops = new ArrayList<>();
+		HoughClass temp;
+		for (int k = 0; k < list.size(); k++) {
+			temp = list.get(k);
+			if( temp.orient == Theta.LEFT_TOP ) {
+				leftTops.add(temp);
+				leftRhoMean += temp.rho;
+				leftThetaMean += temp.theta;
+				leftRhoCount++;
+			}
+			else if( temp.orient == Theta.RIGHT_TOP ) {
+				rightTops.add(temp);
+				rightRhoMean += temp.rho;
+				rightThetaMean += temp.theta;
+				rightRhoCount++;
+			}
+			else if( temp.orient == Theta.HORIZONTAL ) {
+				horizontals.add(temp);
+				horizontalRhoMean += temp.rho;
+				horizontalThetaMean += temp.theta;
+				horizontalRhoCount++;
+			}
+		}
+		leftRhoMean /= leftRhoCount;
+		rightRhoMean /= rightRhoCount;
+		horizontalRhoMean /= horizontalRhoCount;
+		leftThetaMean /= leftRhoCount;
+		rightThetaMean /= rightRhoCount;
+		horizontalThetaMean /= horizontalRhoCount;
+		int maxWindowLength = dstImage.height() > dstImage.width() ? dstImage.height() : dstImage.width();
+		double errorRhoRange = maxWindowLength * 0.2; // 오차범위 20%
+		double errorThetaRange = Math.PI * 0.15; // 오차범위 15%
+		for(int i = 0; i < leftTops.size(); i++ ) {
+			temp = leftTops.get(i);
+//			if( !(Math.abs(temp.rho - leftRhoMean) <= errorRhoRange) ) continue;
+//			else if( !(Math.abs(temp.theta - leftThetaMean) <= errorThetaRange) ) continue;
+			if(leftTop == null) leftTop = temp;
+			if(temp.rho > leftTop.rho) leftTop = temp; 
+		}
+		for(int i = 0; i < rightTops.size(); i++ ) {
+			temp = rightTops.get(i);
+			if( !(Math.abs(temp.rho - rightRhoMean) <= errorRhoRange) ) continue;
+//			else if( !(Math.abs(temp.theta - rightThetaMean) <= errorThetaRange) ) continue;
+			if(rightTop == null) rightTop = temp;
+			if(temp.rho < rightTop.rho) rightTop = temp;
+		}
+		for(int i = 0; i < horizontals.size(); i++ ) {
+			temp = horizontals.get(i);
+			if( temp.rho > horizontalRhoMean ) {
+				if( !(Math.abs(temp.theta - horizontalThetaMean) <= errorThetaRange) ) continue;
+				if(horizontal[MIN] == null) horizontal[MIN] = temp;	
+				if(temp.rho < horizontal[MIN].rho) horizontal[MIN] = temp;
+			}
+			else {
+				if( !(Math.abs(temp.theta - horizontalThetaMean) <= errorThetaRange) ) continue;
+				if(horizontal[MAX] == null) horizontal[MAX] = temp;
+				if(temp.rho > horizontal[MAX].rho) horizontal[MAX] = temp; 
+			}
+		}
+		ArrayList<HoughClass> result = new ArrayList<>();
+		result.add(leftTop); result.add(rightTop); result.add(horizontal[MAX]); result.add(horizontal[MIN]); 
+		try {
+			System.out.println(leftTop);
+			System.out.println(rightTop);
+			System.out.println(horizontal[MAX]);
+			System.out.println(horizontal[MIN]);
+		} catch(Exception e) {
+			System.out.println("ERROR");
+		}
+		return list;
+	}
 	private boolean isCorrectLine(ArrayList<HoughClass> list, double rho, double theta) {
 		boolean result = true;
 		for (int k = 0; k < list.size(); k++) {
-			if ( !( (0 <= theta && theta < 1.1) || (2.10 < theta && theta < 2.90 ) || (1.2 < theta && theta < 1.8 ) )) {
+			if ( !( (0 < theta && theta < 1.1) || (2.10 < theta && theta < 2.90 ) || (1.2 < theta && theta < 2.0 ) )) {
 				result = false;
 				break;
 			}
-			if (Math.abs(Math.abs(list.get(k).rho) - Math.abs(rho)) < srcImage.width() * 0.1
+			
+			if (Math.abs(Math.abs(list.get(k).rho) - Math.abs(rho)) < srcImage.height() * 0.1
 					&& Math.abs(list.get(k).theta - theta) < Math.PI * 2 * 0.1) {
 				result = false;
 				break;
+			}
+			else if(theta < 0.3) {
+				double tempTheta = Math.PI - theta;
+				if( Math.abs(Math.abs(list.get(k).rho) - Math.abs(rho)) < srcImage.height() * 0.1
+						&& Math.abs(list.get(k).theta - tempTheta) < Math.PI * 2 *0.1) {
+					result = false;
+					break;
+				}
 			}
 		}
 		return result;
@@ -107,15 +260,21 @@ public class ImageProcess {
 			data = lines.get(i, 0);
 			rho = data[0];
 			theta = data[1];
-			
+			if (theta == 0)	theta = 0.00001;
 			if( !isCorrectLine(list, rho, theta) ) 
 				continue;
-			if (theta == 0)	theta = 0.00001;
 			list.add(new HoughClass(rho, theta)); 
+//			if ( 0.3 < theta && theta < 1.1 ) 
+//				list.add(new HoughClass(rho, theta, Theta.RIGHT_TOP)); 
+//			else if( 1.2 < theta && theta < 2.0 )
+//				list.add(new HoughClass(rho, theta, Theta.HORIZONTAL));
+//			else if( 0 < theta && theta < 0.3 || 2.1 < theta && theta < 2.9)
+//				list.add(new HoughClass(rho, theta, Theta.LEFT_TOP));
 		}
+		ArrayList<HoughClass> resultList = checkCorrectLine(list);
 		
 		// rho를 기준으로 오름차순 정렬
-		java.util.Collections.sort(list, new Comparator<HoughClass>() {
+		java.util.Collections.sort(resultList, new Comparator<HoughClass>() {
 			@Override
 			public int compare(HoughClass obj1, HoughClass obj2) {
 				return (Math.abs(obj1.rho) < Math.abs(obj2.rho)) ? -1
@@ -124,9 +283,9 @@ public class ImageProcess {
 		});
 		
 		for (int i = 0; i < list.size(); i++)
-			System.out.print("rho: " + list.get(i).rho + " ");
+			System.out.print("rho: " + list.get(i).rho + " " + list.get(i).orient + "\n");
 		System.out.println("");
-		return list;
+		return resultList;
 	}
 	private Point[] extractWarpingPoint(ArrayList<HoughClass> list) {
 		// 라인 순서 변경
@@ -258,19 +417,20 @@ public class ImageProcess {
 		for(int j = 0; j < dst.rows(); j++) {
 			for(int i = 0; i < dst.cols(); i++) {
 				datas = dst.get(j, i); // BGR 순서로 얻는다.
-				if( datas[0] < 115 && datas[1] < 115 && datas[2] > 150 ) // RED
+				if( datas[0] > 200 && datas[1] > 200 && datas[2] > 200 )  // W
+					datas[0] = datas[1] = datas[2] = 255;
+				else if( datas[0] < 115 && datas[1] < 115 && datas[2] > 150 ) // RED
 					datas[0] = datas[1] = datas[2] = 255;
 				else if( datas[1] > 160 && datas[2] > 180 )  // YELLOW
-					datas[0] = datas[1] = datas[2] = 255;
-				else if( datas[0] > 240 && datas[1] > 240 && datas[2] > 240 )  // W
 					datas[0] = datas[1] = datas[2] = 255;
 				else datas[0] = datas[1] = datas[2] = 0;
 				dst.put(j, i, datas);
 			}
 		}
-		
+		Imgproc.erode(dst, dst, Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(3,3)));  
 		Imgproc.dilate(dst, dst, Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(8, 8)));
-		Imgproc.erode(dst, dst, Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(16,16)));  
+		Imgproc.erode(dst, dst, Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(12, 12)));  
+		Imgproc.dilate(dst, dst, Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(4, 4)));
 	
 //		dstImage = dst;
 		Imgproc.cvtColor(dst, dst, Imgproc.COLOR_BGR2GRAY);
@@ -287,9 +447,19 @@ public class ImageProcess {
 		}
 		return centroidPoint;
 	}
-	private void createBall(Point[] centroidPoint) {
-		for(int i = 1; i < centroidPoint.length; i++) 
-			Imgproc.circle(dstImage, centroidPoint[i], 10, new Scalar(0, 0, 255), 5);			
-
+	private void createBall(Point[] centroidPoint, Mat dst) {
+		double[] data;
+		Scalar color = null;
+		for(int i = 1; i < centroidPoint.length; i++) {
+			data = dst.get((int)centroidPoint[i].y, (int)centroidPoint[i].x);
+			if( data[0] > 200 && data[1] > 200 && data[2] > 200 )  // WHITE
+				color = new Scalar(255, 255, 255);
+			else if( data[0] < 115 && data[1] < 115 && data[2] > 150 ) // RED
+				color = new Scalar(0, 0, 255);
+			else if( data[1] > 160 && data[2] > 180 )  // YELLOW
+				color = new Scalar(0, 255, 255);
+			else color = new Scalar(0, 0, 255);
+			Imgproc.circle(dstImage, centroidPoint[i], 5, color, 12);			
+		}	
 	}
 }
